@@ -1,56 +1,73 @@
 import streamlit as st
 import pandas as pd
+import os
 
-# 1. ЗАГРУЗКА ДАННЫХ
+# 1. Загрузка данных
 @st.cache_data
 def load_data():
-    df_sort = pd.read_csv('sortament.csv', header=1)
+    if not os.path.exists('sortament.csv') or not os.path.exists('phi.csv'):
+        return None, None
+        
+    # Читаем сортамент: разделитель ';', заголовки в 3-й строке (header=2)
+    df_sort = pd.read_csv('sortament.csv', sep=';', header=2)
     df_sort.columns = [c.strip() for c in df_sort.columns]
-    df_phi = pd.read_csv('phi.csv', header=1)
+    
+    # Читаем фи: разделитель ';'
+    df_phi = pd.read_csv('phi.csv', sep=';')
     df_phi = df_phi.set_index(df_phi.columns[0])
+    
     return df_sort, df_phi
 
 df_sort, df_phi = load_data()
 
-st.title("🏗️ Профессиональный расчет")
-N = st.number_input("N (кН):", value=680.0)
-R_val = st.selectbox("Ry (МПа):", [200, 220, 240, 260, 280, 300, 320, 340, 360, 380, 400, 440, 480, 520])
-L = st.number_input("L (см):", value=150.0)
-T = st.selectbox("Фасонка (мм):", [8, 10, 12, 14])
-lam1 = st.number_input("λ1:", value=70)
+st.title("🏗️ Расчет сжатого стержня")
 
-if st.button("Рассчитать"):
-    try:
-        R_knsm2 = R_val / 10
-        col_ry = str(R_val)
-        phi1 = df_phi.loc[lam1, col_ry] / 1000
-        
-        # Атр (деление на 2)
-        A_tr = (N * 0.95) / (phi1 * R_knsm2 * 0.95)
-        A_half = A_tr / 2
-        
-        # Подбор
-        best = df_sort[df_sort['As'] >= A_half].iloc[0]
-        iy = best[f'iy_{T}']
-        
-        # Гибкость и уточнение фи
-        lam2 = int(max((L * 0.95) / best['ix, см'], (L * 0.95) / iy))
-        phi2 = df_phi.loc[lam2, col_ry] / 1000
-        
-        # Напряжение
-        sigma = (N * 0.95) / (2 * best['As'] * phi2 * 0.95)
-        
-        # ФИНАЛЬНЫЙ РАСЧЕТ ЗАПАСА
-        reserve = ((R_knsm2 - sigma) / R_knsm2) * 100
-        
-        st.write(f"### Выбран: {best['b']}x{best['d']}")
-        st.write(f"Напряжение σ: {sigma:.2f} кН/см²")
-        st.write(f"**Запас прочности: {reserve:.1f}%**")
-        
-        if sigma <= R_knsm2:
-            st.success("✅ Проходит")
-        else:
-            st.error("❌ Не проходит")
+if df_sort is None:
+    st.error("Файлы sortament.csv или phi.csv не найдены!")
+else:
+    # 2. Интерфейс
+    N = st.number_input("Усилие N (кН):", value=980.0)
+    R_val = st.selectbox("Ry (МПа):", [200, 220, 240, 260, 280, 300, 320, 340, 360, 380, 400])
+    L = st.number_input("Длина L (см):", value=150.0)
+    T = st.selectbox("Фасонка t (мм):", [8, 10, 12, 14])
+    yc = st.number_input("Коэф. условий работы (γc):", value=0.95)
+
+    if st.button("Рассчитать"):
+        try:
+            R_knsm2 = R_val / 10
+            # Предварительный подбор (lambda=70)
+            phi_pre = df_phi.loc[70, R_val] / 1000
+            A_tr = (N * yc) / (phi_pre * R_knsm2 * yc)
+            A_half = A_tr / 2
             
-    except Exception as e:
-        st.error(f"Ошибка: {e}")
+            # Поиск уголка
+            best = df_sort[df_sort['As'] >= A_half].iloc[0]
+            ix = best['ix, см']
+            iy = best[f'iy_{T}']
+            
+            # Проверка гибкости
+            lam_x = (L * yc) / ix
+            lam_y = (L * yc) / iy
+            lam_max = int(max(lam_x, lam_y))
+            
+            # Уточнение фи
+            phi2 = df_phi.loc[lam_max, R_val] / 1000
+            sigma = (N * yc) / (2 * best['As'] * phi2 * yc)
+            
+            # Расчет запаса
+            reserve = ((R_knsm2 - sigma) / R_knsm2) * 100
+            
+            # Вывод
+            st.subheader(f"Результат: Уголок {best['b']}x{best['d']}")
+            st.write(f"Напряжение σ: {sigma:.2f} кН/см²")
+            st.write(f"Запас прочности: **{reserve:.2f}%**")
+            
+            if 0 <= reserve <= 5:
+                st.success("✅ Идеально (запас менее 5%)!")
+            elif reserve > 5:
+                st.warning("⚠️ Большой запас, можно взять уголок меньше.")
+            else:
+                st.error("❌ Не проходит (перегруз)!")
+                
+        except Exception as e:
+            st.error(f"Ошибка в расчете: {e}")
