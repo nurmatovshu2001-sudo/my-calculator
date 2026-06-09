@@ -4,12 +4,13 @@ import pandas as pd
 st.set_page_config(page_title="Расчет стержня фермы", layout="centered")
 st.title("🏗️ Подбор сортамента фермы")
 
-# --- ПОЛНАЯ БАЗА ИЗ ТАБЛИЦЫ (ГОСТ 8509-72) ---
-# Названия колонок подогнаны под ваши параметры
+# --- БАЗА ДАННЫХ ---
+# Добавьте сюда ВСЕ строки из вашего PDF-файла по шаблону
 sortament_data = [
     {"b": 125, "d": 8, "F": 19.7, "rx": 3.87, "ry_8": 5.46, "ry_10": 5.39, "ry_12": 5.53, "ry_14": 5.60},
     {"b": 125, "d": 9, "F": 22.0, "rx": 3.86, "ry_8": 5.48, "ry_10": 5.41, "ry_12": 5.56, "ry_14": 5.63},
-    # Можно добавить остальные строки из вашего PDF таким же образом
+    {"b": 100, "d": 8, "F": 15.6, "rx": 3.07, "ry_8": 4.47, "ry_10": 4.40, "ry_12": 4.54, "ry_14": 4.62},
+    # ... добавьте остальные ...
 ]
 df_sort = pd.DataFrame(sortament_data)
 
@@ -22,44 +23,42 @@ Yy = st.number_input("Yy:", value=0.9)
 t_фасонки = st.selectbox("Толщина фасонки t (мм):", [8, 10, 12, 14])
 lambda_start = st.number_input("Начальная гибкость λ:", value=70)
 
-if st.button("🚀 Выполнить расчет"):
-    phi = 0.705 
-    A_tr = (N * Yx) / (phi * R * Yy)
+# --- АВТОМАТИЧЕСКИЙ РАСЧЕТ ---
+# Убрали if st.button, теперь расчет идет сразу при изменении любого поля
+phi = 0.705 # В реальности тут должен быть поиск по таблице Fi
+A_tr = (N * Yx) / (phi * R * Yy)
+
+# Фильтр по площади
+df_filtered = df_sort[df_sort["F"] >= (A_tr / 2)]
+
+if not df_filtered.empty:
+    best = df_filtered.iloc[0]
+    As = best['F']
+    ix = best['rx']
+    col_name = f"ry_{t_фасонки}"
+    iy = best[col_name]
     
-    # Фильтр по площади
-    df_filtered = df_sort[df_sort["F"] >= (A_tr / 2)]
+    sigma = N / (phi * (2 * As) * Yy)
+    diff = (R - sigma) / R * 100
     
-    if not df_filtered.empty:
-        best = df_filtered.iloc[0]
-        As = best['F']
-        ix = best['rx']
-        # Безопасное получение ключа
-        col_name = f"ry_{t_фасонки}"
-        iy = best[col_name] if col_name in best else 0.0
-        
-        sigma = N / (phi * (2 * As) * Yy)
-        diff = (R - sigma) / R * 100
-        
-        # 1. РЕШЕНИЕ
-        st.write("### Вот решение:")
-        st.markdown(f"""
-        1. **Aтр** = {A_tr:.2f} см²
-        2. **Aтр/2** = {A_tr/2:.2f} см²
-        3. **∟** = {int(best['b'])}x{int(best['d'])}
-           **As** = {As:.2f} см²
-           **ix** = {ix:.2f} см
-           **iy** = {iy:.2f} см
-        4. **λx** = {((L*100)*Yx)/ix:.1f}
-           **λy** = {((L*100)*Yy)/iy:.1f}
-        5. **λ** = {lambda_start}
-        6. **σ** = {sigma:.2f} кН/см²
-        7. **(R-σ)/R * 100%** = {diff:.1f}%
-        """)
-        
-        # 2. ВЕРДИКТ
-        if diff <= 10 or sigma > R:
-            st.error("❌ ВСЁ плохо, Выберите другую λ")
-        else:
-            st.success(f"✅ Молодец, у тебя ответ: σ = {sigma:.2f} кН/см²")
+    st.write("### Вот решение:")
+    st.markdown(f"""
+    1. **Aтр** = {A_tr:.2f} см²
+    2. **Aтр/2** = {A_tr/2:.2f} см²
+    3. **∟** = {int(best['b'])}x{int(best['d'])}
+       **As** = {As:.2f} см²
+       **ix** = {ix:.2f} см
+       **iy** = {iy:.2f} см
+    4. **λx** = {((L*100)*Yx)/ix:.1f}
+       **λy** = {((L*100)*Yy)/iy:.1f}
+    5. **λ** = {lambda_start}
+    6. **σ** = {sigma:.2f} кН/см²
+    7. **(R-σ)/R * 100%** = {diff:.1f}%
+    """)
+    
+    if diff <= 10 or sigma > R:
+        st.error("❌ ВСЁ плохо, Выберите другую λ")
     else:
-        st.error("⚠️ Не найдено подходящее сечение в базе!")
+        st.success(f"✅ Молодец, у тебя ответ: σ = {sigma:.2f} кН/см²")
+else:
+    st.error("⚠️ Не найдено сечение, увеличивай площадь!")
