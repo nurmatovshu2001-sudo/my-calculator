@@ -1,79 +1,54 @@
 import streamlit as st
 import pandas as pd
 
-# 1. КОНФИГУРАЦИЯ
-st.set_page_config(page_title="Инженерный калькулятор фермы", layout="centered")
+# 1. ЗАГРУЗКА ТВОИХ ДАННЫХ
+df_phi = pd.read_csv('Копия_ Задачник - лол – 7 июня, 23_07 (1).xlsx - коэф.csv').set_index('Гибкость λ')
+df_sort = pd.read_csv('Копия_ Задачник - лол – 7 июня, 23_07 (1).xlsx - сортамент.csv')
 
-# 2. БАЗА ДАННЫХ (Расширяй этот список данными из своего PDF)
-# iy_N — радиус инерции при толщине фасонки N мм
-SORTAMENT = [
-    {"b": 45, "d": 4, "A": 3.48, "ix": 1.38, "iy_8": 2.24, "iy_10": 2.16, "iy_12": 2.32, "iy_14": 2.40},
-    {"b": 50, "d": 4, "A": 3.89, "ix": 1.54, "iy_8": 2.35, "iy_10": 2.43, "iy_12": 2.51, "iy_14": 2.59},
-    {"b": 63, "d": 5, "A": 6.13, "ix": 1.94, "iy_8": 2.92, "iy_10": 2.98, "iy_12": 3.04, "iy_14": 3.11},
-    {"b": 125, "d": 9, "A": 22.0, "ix": 3.86, "iy_8": 5.48, "iy_10": 5.41, "iy_12": 5.56, "iy_14": 5.63}
-]
-df = pd.DataFrame(SORTAMENT)
+# 2. ИНТЕРФЕЙС
+st.title("🏗️ Профессиональный расчет фермы")
+N = st.number_input("Усилие N (кН):", value=876.0)
+R_val = st.selectbox("Ry (МПа):", [200, 220, 240, 260, 280, 300, 320, 340, 360, 380, 400, 440, 480, 520])
+L = st.number_input("Длина стержня l (м):", value=3.2)
+T = st.selectbox("Толщина фасонки (мм):", [8, 10, 12, 14])
+lam1 = st.number_input("λ1:", value=70)
 
-# 3. ИНТЕРФЕЙС
-st.title("🏗️ Расчет сжатого стержня фермы")
-col1, col2 = st.columns(2)
-with col1:
-    N = st.number_input("N (кН):", value=876.0)
-    R = st.number_input("R (кН/см²):", value=23.0) # Сталь С235
-    L = st.number_input("l (м):", value=3.2)
-    lam1 = st.number_input("λ1 (для подбора):", value=70.0)
-with col2:
-    Yx = st.number_input("Yx:", value=0.9)
-    Yy = st.number_input("Yy:", value=0.9)
-    T = st.selectbox("Толщина фасонки (мм):", [8, 10, 12, 14])
-
-# 4. ЛОГИКА РАСЧЕТА
-if st.button("🚀 Выполнить расчет"):
-    try:
-        # П1-2: Расчет требуемой площади
-        # Заглушка phi1 (в реальности заменить на функцию поиска по таблице)
-        phi1 = 0.705 
-        A_tr = (N * Yx) / (phi1 * R * Yy)
-        A_half = A_tr / 2
-        
-        # П3: Подбор сечения
-        best = df[df["A"] >= A_half].iloc[0]
-        
-        # Динамический выбор iy в зависимости от фасонки
-        iy_col = f"iy_{T}"
-        iy = best[iy_col]
-        ix = best["ix"]
-        A_s = best["A"]
-        
-        # П4-5: Гибкость
-        lam_x = (L * 100 * Yx) / ix
-        lam_y = (L * 100 * Yy) / iy
-        lam2 = round(max(lam_x, lam_y))
-        
-        # П6: Проверка напряжений
-        # Заглушка phi2
-        phi2 = 0.600 
-        sigma = (N * Yx) / (2 * A_s * phi2 * Yy)
-        
-        # П7: Запас
-        reserve = ((R - sigma) / R) * 100
-        
-        # ВЫВОД
-        st.subheader("Результаты расчета")
-        st.markdown(f"""
-        * **1. Атр**: {A_tr:.2f} см²
-        * **2. Атр/2**: {A_half:.2f} см²
-        * **3. Выбран уголок**: {int(best['b'])}x{int(best['d'])} (As={A_s} см²)
-        * **4. Гибкость**: λx={lam_x:.1f}, λy={lam_y:.1f}
-        * **5. λ2 (max)**: {lam2}
-        * **6. Напряжение σ**: {sigma:.2f} кН/см² (при R={R})
-        * **7. Запас прочности**: **{reserve:.1f}%**
-        """)
-        
-        if sigma <= R:
-            st.success("✅ Стержень проходит по прочности.")
-        else:
-            st.error("❌ Стержень не проходит по прочности!")
-            
-    except Exception as e:
-        st.error(f"Ошибка в расчетах: {e}. Проверь параметры сечения!")
+if st.button("🚀 Выполнить точный расчет"):
+    # Логика поиска Phi из твоей таблицы
+    col_name = str(R_val)
+    phi1 = df_phi.loc[lam1, col_name] / 1000
+    
+    # Расчет Атр (перевод Ry в кН/см2 = МПа/10)
+    R_knsm2 = R_val / 10
+    A_tr = (N * 0.9) / (phi1 * R_knsm2 * 0.9)
+    A_half = A_tr / 2
+    
+    # Подбор из твоего сортамента
+    # Фильтруем таблицу по площади
+    suitable = df_sort[df_sort['As'] >= A_half]
+    best = suitable.iloc[0]
+    
+    # Берем iy динамически (названия колонок в CSV: iy_8, iy_10 и т.д.)
+    iy = best[f'iy_{T}']
+    
+    # Расчет гибкостей
+    lam_x = (L * 100 * 0.9) / best['ix, см']
+    lam_y = (L * 100 * 0.9) / iy
+    lam2 = int(max(lam_x, lam_y))
+    
+    # Уточненный Phi2
+    phi2 = df_phi.loc[lam2, col_name] / 1000
+    
+    # Проверка
+    sigma = (N * 0.9) / (2 * best['As'] * phi2 * 0.9)
+    
+    st.write("---")
+    st.write(f"### Выбран уголок: {best['b']}x{best['d']}")
+    st.write(f"**Атр**: {A_tr:.2f} см²")
+    st.write(f"**λ2**: {lam2} (φ2 = {phi2:.3f})")
+    st.write(f"**Напряжение σ**: {sigma:.2f} кН/см²")
+    
+    if sigma <= R_knsm2:
+        st.success("✅ Проходит")
+    else:
+        st.error("❌ Не проходит")
