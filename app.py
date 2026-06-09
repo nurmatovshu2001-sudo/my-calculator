@@ -12,19 +12,22 @@ st.set_page_config(
 st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem !important; padding-bottom: 1.5rem !important; padding-left: 1rem !important; padding-right: 1rem !important; }
-    div.stButton > button:first-child { width: 100% !important; height: 3.5rem !important; font-size: 1.1rem !important; border-radius: 12px !important; }
+    div.stButton > button:first-child { width: 100% !important; height: 3.5rem !important; font-size: 1.1rem !important; border-radius: 12px !important; margin-top: 10px; }
     .result-card { background-color: #f0f7f4; padding: 18px; border-radius: 12px; border-left: 6px solid #2e7d32; margin-top: 15px; margin-bottom: 15px; }
-    .formula-block { background-color: #f8f9fa; padding: 12px; border-radius: 8px; border: 1px solid #e0e0e0; font-family: monospace; }
+    .section-divider { border-top: 2px dashed #ccc; margin-top: 25px; margin-bottom: 15px; }
+    .selection-title { color: #0288d1; font-weight: bold; font-size: 1.1rem; margin-bottom: 5px; }
     @media (prefers-color-scheme: dark) {
         .result-card { background-color: #1b3820; color: #a5d6a7; }
-        .formula-block { background-color: #1e2430; border-color: #384259; }
+        .section-divider { border-color: #444; }
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏗️ Автоматический подбор сортамента фермы")
+st.title("🏗️ Подбор сортамента фермы")
 
-# 1. Текстовая база данных коэффициентов Фи (Полная версия)
+# =========================================================
+# БАЗА ДАННЫХ: КОЭФФИЦИЕНТЫ ФИ И СОРТАМЕНТ ИЗ ТВОИХ ФАЙЛОВ
+# =========================================================
 raw_phi_data = """λ,200,220,240,245,260,280,300,320,340,360,380,400,440,480,520
 1,999,999,999,999,999,999,999,999,999,999,999,999,999,999,999
 2,999,999,999,999,999,999,999,999,998,998,998,998,998,998,998
@@ -47,9 +50,6 @@ df_phi = pd.read_csv(io.StringIO(raw_phi_data.strip()), index_col=0)
 df_phi.index = df_phi.index.astype(int)
 df_phi.columns = df_phi.columns.astype(int)
 
-# 2. Оцифрованная база данных СОРТАМЕНТА из твоего PDF-файла
-# Поля: b (ширина), d (толщина), F (площадь), rx (радиус ix)
-# Отрезано по колонкам iy для фасонок 8, 10, 12, 14 мм
 sortament_data = [
     {"b": 45, "d": 4, "F": 3.48, "rx": 1.38, "ry_8": 2.24, "ry_10": 2.16, "ry_12": 2.32, "ry_14": 2.40},
     {"b": 45, "d": 5, "F": 4.29, "rx": 1.37, "ry_8": 2.26, "ry_10": 2.18, "ry_12": 2.34, "ry_14": 2.42},
@@ -79,101 +79,24 @@ sortament_data = [
 
 df_sort = pd.DataFrame(sortament_data)
 
-# --- ИНТЕРФЕЙС ВВОДА ДАННЫХ ---
-st.subheader("📋 Шаг 1. Исходные параметры")
+# =========================================================
+# БЛОК 1: ДАННЫЕ ИЗ УСЛОВИЯ ЗАДАЧИ
+# =========================================================
+st.subheader("📋 Данные из условия задачи")
 
 N = st.number_input("Продольное усилие N (кН):", value=560.0, step=10.0)
 R = st.number_input("Расчетное сопротивление R (кН/см²):", value=38.0, step=1.0)
 L = st.number_input("Геометрическая длина стержня L (м):", value=1.5, step=0.1)
 
 col1, col2 = st.columns(2)
-with col1: Yx = st.number_input("Коэффициент Yx:", value=0.9, step=0.1)
-with col2: Yy = st.number_input("Коэффициент Yy:", value=0.9, step=0.1)
+with col1: Yx = st.number_input("Коэффициент расчетной длины Yx:", value=0.9, step=0.1)
+with col2: Yy = st.number_input("Коэффициент расчетной длины Yy:", value=0.9, step=0.1)
 
-lambda_start = st.number_input("Начальная гибкость λ:", value=100, step=1)
+# =========================================================
+# РАЗДЕЛИТЕЛЬ И БЛОК 2: ПАРАМЕТРЫ ДЛЯ САМОСТОЯТЕЛЬНОГО ВЫБОРА
+# =========================================================
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+st.markdown('<div class="selection-title">⚙️ Параметры подбора (выбрать самостоятельно):</div>', unsafe_allow_html=True)
 
-# ВЫБОР ТОЛЩИНЫ ФАСОНКИ ИЗ ТВОЕЙ ТАБЛИЦЫ
-t_фасонки = st.selectbox("Толщина фасонки t (мм):", options=[8, 10, 12, 14], index=1)
-
-# --- РАСЧЕТ ПЕРВОГО ПРИБЛИЖЕНИЯ ---
-ry_mpa = int(R * 10)
-closest_col = min(df_phi.columns, key=lambda x: abs(x - ry_mpa))
-closest_row = min(df_phi.index, key=lambda x: abs(x - lambda_start))
-
-try:
-    phi = int(df_phi.loc[closest_row, closest_col]) / 1000
-except Exception:
-    phi = 0.593  # дефолт для 100 и 400 МПа
-
-# Требуемые площади
-A_tr = (N * Yx) / (phi * R * Yy)
-A_one_tr = A_tr / 2
-
-if st.button("🚀 Выполнить автоматический подбор сечения", type="primary"):
-    st.write("---")
-    st.write(f"### Результат расчёта:")
-    st.write(f"При $\lambda = {lambda_start}$ и $R_y = {ry_mpa}$ МПа найден $\phi = {phi:.3f}$")
-    st.write(f"Требуемая площадь одного уголка: $A_{{1,тр}} = {A_one_tr:.2f}$ см²")
-    
-    # --- ЛОГИКА АВТОПОДБОРА ПО СОРТАМЕНТУ ---
-    # Имя колонки с нужным iy
-    ry_col_name = f"ry_{t_фасонки}"
-    
-    # Шаг 1: Фильтруем уголки, у которых толщина полки d равна толщине фасонки t
-    df_filtered = df_sort[df_sort["d"] == t_фасонки]
-    
-    # Если таких нет, берем все уголки, где площадь больше требуемой
-    if df_filtered.empty or df_filtered[df_filtered["F"] >= A_one_tr].empty:
-        df_filtered = df_sort[df_sort["F"] >= A_one_tr]
-    else:
-        df_filtered = df_filtered[df_filtered["F"] >= A_one_tr]
-        
-    if not df_filtered.empty:
-        # Шаг 2: Сортируем по площади и берем САМЫЙ БЛИЖАЙШИЙ К ЗНАЧЕНИЮ А1,тр
-        best_match = df_filtered.sort_values(by="F").iloc[0]
-        
-        # Вытаскиваем значения по твоим пунктам:
-        уголок_name = f"∟ {int(best_match['b'])}x{int(best_match['d'])}"
-        As = best_match['F']
-        ix = best_match['rx']
-        iy = best_match[ry_col_name]
-        
-        # Считаем процент перерасхода для информации
-        запас_площади = ((As - A_one_tr) / A_one_tr) * 100
-        
-        # Вывод строго по твоей форме:
-        st.markdown(f"""
-        <div class="result-card">
-            <h3 style='margin-top:0; color:#1b5e20;'>Принятый сортамент:</h3>
-            <p style='font-size:1.2rem;'>1. <b>угол:</b> {уголок_name}</p>
-            <p style='font-size:1.2rem;'>2. <b>As:</b> {As:.2f} см² (при требуемой {A_one_tr:.2f} см²)</p>
-            <p style='font-size:1.2rem;'>3. <b>ix:</b> {ix:.2f} см</p>
-            <p style='font-size:1.2rem;'>4. <b>iy:</b> {iy:.2f} см</p>
-            <span style='font-size:0.9rem; color:#555;'>Уголок автоматически подобран под толщину фасонки t = {t_фасонки} мм с минимальным запасом площади (+{запас_площади:.1f}%).</span>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # --- ФИНАЛЬНАЯ ПРОВЕРКА ВТОРОГО ПРИБЛИЖЕНИЯ НА ЛЕТУ ---
-        Lef_x = (L * 100) * Yx
-        Lef_y = (L * 100) * Yy
-        
-        lambda_x_fact = Lef_x / ix
-        lambda_y_fact = Lef_y / iy
-        lambda_max_fact = max(lambda_x_fact, lambda_y_fact)
-        
-        closest_row_2 = min(df_phi.index, key=lambda x: abs(x - int(round(lambda_max_fact))))
-        phi_fact = int(df_phi.loc[closest_row_2, closest_col]) / 1000
-        
-        sigma = N / (phi_fact * (As * 2))
-        
-        st.write("### Проверка устойчивости (2-е приближение):")
-        st.latex(r"\lambda_{max} = \max\left(" + f"{lambda_x_fact:.1f}, {lambda_y_fact:.1f}" + r"\right) = " + f"{lambda_max_fact:.1f}")
-        st.write(f"По таблице Фи для новой гибкости $\lambda = {closest_row_2}$ найден коэффициент $\phi_{{факт}} = {phi_fact:.3f}$")
-        
-        if sigma <= R:
-            st.success(f"✅ Проверка пройдена! Напряжение σ = {sigma*10:.1f} МПа ≤ Ry = {R*10:.0f} МПа. Сечение подобрано идеально!")
-        else:
-            st.error(f"❌ Перенапряжение! σ = {sigma*10:.1f} МПа > Ry = {R*10:.0f} МПа. Требуется уголок побольше.")
-            
-    else:
-        st.warning("⚠️ В базе данных задачника не найдено уголков с такой большой площадью. Проверь исходные усилия N.")
+# Перенесли начальную гибкость вниз
+lambda_start = st.number_input("Нача
