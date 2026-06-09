@@ -2,11 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 
-# Фиксированные параметры
-L_CONST = 150.0
-T_CONST = 12
-YC_CONST = 0.95
-
+# 1. Загрузка данных
 @st.cache_data
 def load_data():
     if not os.path.exists('sortament.csv') or not os.path.exists('phi.csv'):
@@ -22,46 +18,49 @@ df_sort, df_phi = load_data()
 st.title("🏗️ Расчет сжатого стержня")
 
 if df_sort is None:
-    st.error("Файлы данных не найдены!")
+    st.error("Файлы sortament.csv или phi.csv не найдены!")
 else:
-    # Пользователь вводит ТОЛЬКО N и R
-    N = st.number_input("Усилие N (кН):", value=980.0)
+    # Ввод параметров студентом
+    N = st.number_input("Усилие N (кН):", value=680.0)
     R_val = st.selectbox("Ry (МПа):", [200, 220, 240, 260, 280, 300, 320, 340, 360, 380, 400])
+    L = st.number_input("Длина L (см):", value=150.0)
+    T = st.selectbox("Фасонка t (мм):", [8, 10, 12, 14])
+    Ys = st.number_input("Коэф. Ys:", value=0.95)
+    Yy = st.number_input("Коэф. Yy:", value=0.95)
 
     if st.button("Рассчитать"):
         try:
             R_knsm2 = R_val / 10
-            # Предварительный подбор (lambda=70)
+            # Предварительный подбор
             phi_pre = df_phi.loc[70, R_val] / 1000
-            A_tr = (N * YC_CONST) / (phi_pre * R_knsm2 * YC_CONST)
+            A_tr = (N * Ys) / (phi_pre * R_knsm2 * Yy)
             A_half = A_tr / 2
             
             # Поиск уголка
             best = df_sort[df_sort['As'] >= A_half].iloc[0]
             ix = best['ix, см']
-            iy = best[f'iy_{T_CONST}']
+            iy = best[f'iy_{T}']
             
             # Проверка гибкости
-            lam_x = (L_CONST * YC_CONST) / ix
-            lam_y = (L_CONST * YC_CONST) / iy
-            lam_max = int(max(lam_x, lam_y))
+            lam_max = int(max((L * Ys) / ix, (L * Ys) / iy))
             
             # Уточнение фи
             phi2 = df_phi.loc[lam_max, R_val] / 1000
-            sigma = (N * YC_CONST) / (2 * best['As'] * phi2 * YC_CONST)
+            sigma = (N * Ys) / (2 * best['As'] * phi2 * Yy)
             
-            # Расчет запаса
+            # Расчет запаса (Дельта)
             reserve = ((R_knsm2 - sigma) / R_knsm2) * 100
             
-            st.subheader(f"Результат: Уголок {best['b']}x{best['d']}")
+            st.subheader(f"Выбран уголок: {best['b']}x{best['d']}")
             st.write(f"Напряжение σ: {sigma:.2f} кН/см²")
-            st.write(f"Запас прочности: **{reserve:.2f}%**")
+            st.write(f"Запас прочности (Дельта): **{reserve:.2f}%**")
             
             if 0 <= reserve <= 5:
                 st.success("✅ Идеально (запас менее 5%)!")
-            elif reserve > 5:
-                st.warning("⚠️ Большой запас, можно взять уголок меньше.")
+            elif reserve < 0:
+                st.error("❌ Сечение не проходит!")
             else:
-                st.error("❌ Не проходит (перегруз)!")
+                st.warning("⚠️ Большой запас прочности.")
+                
         except Exception as e:
-            st.error(f"Ошибка в расчете: {e}")
+            st.error(f"Ошибка: {e}")
