@@ -1,74 +1,78 @@
 import streamlit as st
 import pandas as pd
+import io
 
-st.set_page_config(page_title="Расчет стержня фермы", layout="centered")
-st.title("🏗️ Подбор сортамента фермы")
+st.set_page_config(page_title="Расчет фермы", layout="centered")
 
-# --- БАЗА ДАННЫХ (с ry_8, ry_10, ry_12, ry_14) ---
-sortament_data = [
-    {"b": 125, "d": 9, "F": 22.0, "rx": 3.86, "ry_8": 5.48, "ry_10": 5.41, "ry_12": 5.56, "ry_14": 5.63},
-    # Добавь остальные строки из таблицы по этому же шаблону...
-]
-df_sort = pd.DataFrame(sortament_data)
+# --- СТИЛИ ---
+st.markdown("""
+    <style>
+    div.stButton > button:first-child { width: 100%; height: 3.5rem; font-size: 1.1rem; }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("🏗️ Расчет стержня фермы")
 
 # --- ИСХОДНЫЕ ДАННЫЕ ---
-st.subheader("📋 Исходные данные")
 N = st.number_input("Продольное усилие N (кН):", value=876.0)
 R = st.number_input("Расчетное сопротивление R (кН/см²):", value=30.0)
-L = st.number_input("Геометрическая длина стержня L (м):", value=3.2)
-Yx = st.number_input("Yx:", value=0.9)
-Yy = st.number_input("Yy:", value=0.9)
-t_фасонки = st.selectbox("Толщина фасонки t (мм):", [8, 10, 12, 14])
+L = st.number_input("Геометрическая длина L (м):", value=3.2)
+Yx = st.number_input("Коэффициент Yx:", value=0.9, step=0.1)
+Yy = st.number_input("Коэффициент Yy:", value=0.9, step=0.1)
+lambda_start = st.number_input("Начальная гибкость λ:", value=83)
 
-# --- ЭТАП 1: ПОДБОР ---
-st.subheader("⚙️ Этап 1: Подбор сечения")
-lambda_input = st.number_input("Задайте начальную гибкость λ (для подбора):", value=70)
-phi_input = st.number_input("Задайте коэффициент фи φ (для подбора):", value=0.705, format="%.3f")
+# --- ТАБЛИЦА ФИ (БЕЗ ИЗМЕНЕНИЙ) ---
+raw_table_data = """λ\t200\t220\t240\t260\t280\t300\t320\t340\t360\t380\t400\t440\t480\t520
+... (твоя таблица) ...
+""" # (Вставь сюда всю таблицу из исходного файла)
 
-# Вычисление Атр для подбора
-A_tr = (N * Yx) / (phi_input * R * Yy)
-df_filtered = df_sort[df_sort["F"] >= (A_tr / 2)]
+# --- ПАРСИНГ ТАБЛИЦЫ ---
+df_phi = pd.read_csv(io.StringIO(raw_table_data.strip()), sep="\t", dtype=str)
+df_phi.set_index("λ", inplace=True)
+for col in df_phi.columns:
+    df_phi[col] = df_phi[col].str.replace(r'[^\w]', '', regex=True)
+df_phi.index = [int(str(idx).replace('S', '8')) for idx in df_phi.index]
+df_phi.columns = [int(col) for col in df_phi.columns]
 
-if not df_filtered.empty:
-    best = df_filtered.iloc[0]
-    As = best['F']
-    ix = best['rx']
-    iy = best[f"ry_{t_фасонки}"]
+# --- КНОПКА РАСЧЕТА ---
+if st.button("🚀 Выполнить расчет", type="primary"):
     
-    st.write(f"Подобрано сечение: ∟ {int(best['b'])}x{int(best['d'])}, As = {As} см²")
+    # 1. Автоматический поиск ФИ
+    ry_mpa = int(R * 10)
+    closest_col = min(df_phi.columns, key=lambda x: abs(x - ry_mpa))
+    closest_row = min(df_phi.index, key=lambda x: abs(x - int(lambda_start)))
+    phi = int(df_phi.loc[closest_row, closest_col].replace('S', '8')) / 1000
     
-    # --- ЭТАП 2: ИТОГОВОЕ РЕШЕНИЕ ---
-    st.subheader("📊 Этап 2: Итоговое решение")
+    # 2. Расчеты
+    A_tr = (N * Yx) / (phi * R * Yy)
+    A_one = A_tr / 2
     
-    # Расчет λ факт
-    lx_fact = (L * 100) * Yx / ix
-    ly_fact = (L * 100) * Yy / iy
-    lambda_max = round(max(lx_fact, ly_fact))
+    # Предположим выбор уголка (здесь твоя логика подбора)
+    b, d, As, ix, iy = 125, 9, 22.0, 3.86, 5.48 # Пример данных
     
-    # Тут должна быть логика поиска фи по lambda_max из таблицы
-    # Для примера берем фи из рукописного решения (0.597)
-    phi_fact = 0.597 
+    lx = (L * 100) / ix
+    ly = (L * 100) / iy
+    lambda_calc = round(max(lx, ly))
     
-    sigma = (N * Yx) / (2 * As * phi_fact * Yy)
+    sigma = (N * Yx) / (2 * As * phi * Yy)
     diff = (R - sigma) / R * 100
     
+    # 3. ВЫВОД 7 ПУНКТОВ
+    st.subheader("Результат решения:")
     st.markdown(f"""
     1. **Aтр** = {A_tr:.2f} см²
-    2. **Aтр/2** = {A_tr/2:.2f} см²
-    3. **∟** = {int(best['b'])}x{int(best['d'])}
-       **As** = {As:.2f} см²
-       **ix** = {ix:.2f} см
-       **iy** = {iy:.2f} см
-    4. **λx** = {lx_fact:.1f}
-       **λy** = {ly_fact:.1f}
-    5. **λ** = {lambda_max} (фи = {phi_fact})
+    2. **Aтр/2** = {A_one:.2f} см²
+    3. **∟** = {b}x{d} <br>
+       **As** = {As} см² <br>
+       **ix** = {ix} см <br>
+       **iy** = {iy} см
+    4. **λx** = {lx:.1f}  **λy** = {ly:.1f}
+    5. **λ** = {lambda_calc}
     6. **σ** = {sigma:.2f} кН/см²
     7. **(R-σ)/R * 100%** = {diff:.1f}%
     """)
     
-    if diff <= 10 or sigma > R:
-        st.error("❌ ВСЁ плохо, Выберите другую λ")
+    if sigma <= R:
+        st.success("✅ Условие σ <= R выполняется")
     else:
-        st.success("✅ Молодец!")
-else:
-    st.error("⚠️ Увеличьте площадь сечения!")
+        st.error("❌ Условие σ <= R НЕ выполняется!")
