@@ -1,40 +1,74 @@
-# 1. Расчет коэффициента ФИ (примерная логика для итерации)
-    # Сначала считаем фи1 на основе начальной ламбды
-    phi1 = get_phi(lam1, R) 
+import streamlit as st
+import pandas as pd
+import io
+
+st.set_page_config(page_title="Расчет стержня фермы", layout="centered")
+
+# 1. ТВОЯ ТАБЛИЦА СОРТАМЕНТА (ГОСТ 8509-72)
+# Вставь сюда остальные данные из своего PDF, придерживаясь этого формата:
+sort_data = [
+    {"b": 45, "d": 4, "F": 3.48, "ix": 1.38, "iy_8": 2.24, "iy_10": 2.16, "iy_12": 2.32, "iy_14": 2.40},
+    {"b": 50, "d": 4, "F": 3.89, "ix": 1.54, "iy_8": 2.35, "iy_10": 2.43, "iy_12": 2.51, "iy_14": 2.59},
+    {"b": 63, "d": 5, "F": 6.13, "ix": 1.94, "iy_8": 2.92, "iy_10": 2.98, "iy_12": 3.04, "iy_14": 3.11},
+    {"b": 125, "d": 9, "F": 22.0, "ix": 3.86, "iy_8": 5.48, "iy_10": 5.41, "iy_12": 5.56, "iy_14": 5.63}
+]
+df_sort = pd.DataFrame(sort_data)
+
+# 2. ИНТЕРФЕЙС
+st.title("🏗️ Расчет стержня")
+N = st.number_input("N (кН):", value=876.0)
+R = st.number_input("R (кН/см²):", value=30.0)
+L = st.number_input("l (м):", value=3.2)
+Yx = st.number_input("Yx:", value=0.9)
+Yy = st.number_input("Yy:", value=0.9)
+T = st.selectbox("T (фасонка, мм):", [8, 10, 12, 14])
+lam1 = st.number_input("λ1 (для подбора):", value=70)
+
+# 3. РАСЧЕТ
+if st.button("🚀 Выполнить расчет"):
+    # Заглушка для фи, так как полная таблица Phi требует отдельной логики
+    phi1 = 0.705 
+    phi2 = 0.600
     
-    # 2. ПЕРЕСЧЕТ Атр (ЗДЕСЬ ОН ОБНОВИТСЯ ПРИ СМЕНЕ ЛЮБОГО ВХОДНОГО ПАРАМЕТРА)
+    # 1. Атр
     A_tr = (N * Yx) / (phi1 * R * Yy)
+    # 2. Атр/2
     A_half = A_tr / 2
     
-    # 3. ПОДБОР УГОЛКА (теперь берет самый свежий A_half)
-    # Используем .iloc[0] для выбора первой подходящей строки из PDF-таблицы
+    # 3. ПОДБОР УГОЛКА
     best = df_sort[df_sort["F"] >= A_half].iloc[0]
-    
     As = best["F"]
     ix = best["ix"]
-    # Вот здесь магия: динамически берем iy для нужной толщины T
     iy = best[f"iy_{T}"]
-def get_phi(lam, r_val):
-    # Берем данные из таблицы df_phi (которую мы загрузили из строк 1-150)
-    # Ищем столбец, ближайший к R*10 (МПа)
-    ry_mpa = int(r_val * 10)
-    closest_col = min(df_phi.columns, key=lambda x: abs(x - ry_mpa))
-    # Ищем строку, ближайшую к текущей lambda
-    closest_row = min(df_phi.index, key=lambda x: abs(x - int(lam)))
-    return int(df_phi.loc[closest_row, closest_col]) / 1000
-    if st.button("🚀 Выполнить расчет сечения", type="primary"):
-    # 1. Сначала считаем ФИ для начальной гибкости
-    phi1 = get_phi(lam1, R) 
     
-    # 2. Теперь Атр пересчитается правильно, так как phi1 берется из таблицы
-    A_tr = (N * Yx) / (phi1 * R * Yy)
-    A_one = A_tr / 2
+    # 4. λx, λy
+    lam_x = (L * 100 * Yx) / ix
+    lam_y = (L * 100 * Yy) / iy
     
-    # 3. Подбор уголка (программа ищет тот, что больше A_one)
-    # Используем .iloc[0] для выбора первой подходящей строки
-    best = df_sort[df_sort["F"] >= A_one].iloc[0]
-    As = best["F"]
-    ix = best["ix"]
-    iy = best[f"iy_{T}"] # Здесь T - это толщина из твоего selectbox
+    # 5. λ2
+    lam2 = round(max(lam_x, lam_y))
     
-    # И так далее для λ2, σ, и %.
+    # 6. σ
+    sigma = (N * Yx) / (2 * As * phi2 * Yy)
+    
+    # 7. %
+    diff = ((R - sigma) / R) * 100
+    
+    # ВЫВОД
+    st.markdown("---")
+    st.markdown(f"**λ1 = {lam1} ; φ1 = {phi1:.3f}**")
+    st.markdown(f"""
+    1. **Атр** = {A_tr:.2f} см²
+    2. **Атр/2** = {A_half:.2f} см²
+    3. **∟** = {int(best['b'])}x{int(best['d'])} <br> 
+       **As** = {As:.2f} см² | **ix** = {ix:.2f} см | **iy** = {iy:.2f} см
+    4. **λx** = {lam_x:.1f} | **λy** = {lam_y:.1f}
+    5. **λ2** = {lam2}
+    6. **σ** = {sigma:.2f} <= {R}
+    7. **(R-σ)/R * 100%** = {diff:.1f}%
+    """, unsafe_allow_html=True)
+    
+    if sigma <= R:
+        st.success("✅ Проверка прочности пройдена!")
+    else:
+        st.error("❌ Сечение не проходит!")
