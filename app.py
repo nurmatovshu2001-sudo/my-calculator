@@ -8,12 +8,11 @@ def load_data():
     if not os.path.exists('sortament.csv') or not os.path.exists('phi.csv'):
         return None, None
         
-    # Читаем сортамент: разделитель ';', заголовки в 3-й строке (header=2)
-    df_sort = pd.read_csv('sortament.csv', sep=';', header=2)
+    # Читаем файлы с кодировкой cp1251, так как они созданы в Excel
+    df_sort = pd.read_csv('sortament.csv', sep=';', header=2, encoding='cp1251')
     df_sort.columns = [c.strip() for c in df_sort.columns]
     
-    # Читаем фи: разделитель ';'
-    df_phi = pd.read_csv('phi.csv', sep=';')
+    df_phi = pd.read_csv('phi.csv', sep=';', encoding='cp1251')
     df_phi = df_phi.set_index(df_phi.columns[0])
     
     return df_sort, df_phi
@@ -23,7 +22,7 @@ df_sort, df_phi = load_data()
 st.title("🏗️ Расчет сжатого стержня")
 
 if df_sort is None:
-    st.error("Файлы sortament.csv или phi.csv не найдены!")
+    st.error("Файлы sortament.csv или phi.csv не найдены в репозитории!")
 else:
     # 2. Интерфейс
     N = st.number_input("Усилие N (кН):", value=980.0)
